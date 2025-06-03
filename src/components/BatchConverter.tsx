@@ -1,21 +1,34 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Copy, Download, Trash2 } from 'lucide-react';
+import { Copy, Download, Trash2, AlertCircle, CheckCircle } from 'lucide-react';
 import { validateHexInput, convertHexToDecimal } from '@/utils/converter';
 import { useToast } from '@/hooks/use-toast';
 import * as XLSX from 'xlsx';
 
+interface BatchResult {
+  original: string;
+  hex: string;
+  decimal: string;
+  isValid: boolean;
+  error?: string;
+}
+
 const BatchConverter = () => {
   const [batchInput, setBatchInput] = useState('');
-  const [batchResults, setBatchResults] = useState<Array<{hex: string, decimal: string, isValid: boolean}>>([]);
+  const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
   const { toast } = useToast();
 
   const processBatch = () => {
-    const lines = batchInput.split('\n').filter(line => line.trim() !== '');
+    setIsProcessing(true);
+    
+    const lines = batchInput
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line !== '');
     
     if (lines.length === 0) {
       toast({
@@ -23,15 +36,42 @@ const BatchConverter = () => {
         description: "Por favor, digite pelo menos um código iButton.",
         variant: "destructive",
       });
+      setIsProcessing(false);
       return;
     }
 
-    const results = lines.map(line => {
-      const hex = line.trim().toUpperCase();
-      const isValid = validateHexInput(hex);
-      const decimal = isValid ? convertHexToDecimal(hex) : 'INVÁLIDO';
+    const results: BatchResult[] = lines.map((line, index) => {
+      const original = line;
+      const hex = line.toUpperCase().replace(/[^0-9A-F]/g, ''); // Remove caracteres não-hex
       
-      return { hex, decimal, isValid };
+      // Validações específicas
+      let error = '';
+      let isValid = false;
+      let decimal = 'INVÁLIDO';
+
+      if (hex.length !== 16) {
+        error = `Deve ter exatamente 16 dígitos (atual: ${hex.length})`;
+      } else if (!validateHexInput(hex)) {
+        error = 'Contém caracteres inválidos';
+      } else {
+        isValid = true;
+        const result = convertHexToDecimal(hex);
+        if (result === 'INVÁLIDO' || result === 'ERRO') {
+          isValid = false;
+          error = 'Erro na conversão';
+          decimal = result;
+        } else {
+          decimal = result;
+        }
+      }
+      
+      return { 
+        original, 
+        hex, 
+        decimal, 
+        isValid,
+        error: isValid ? undefined : error
+      };
     });
 
     setBatchResults(results);
@@ -43,12 +83,25 @@ const BatchConverter = () => {
       title: "Conversão concluída",
       description: `${validCount} conversões válidas, ${invalidCount} inválidas.`,
     });
+    
+    setIsProcessing(false);
   };
 
   const handleCopyResults = async () => {
     if (batchResults.length === 0) return;
 
-    const resultText = batchResults
+    const validResults = batchResults.filter(r => r.isValid);
+    
+    if (validResults.length === 0) {
+      toast({
+        title: "Atenção",
+        description: "Não há resultados válidos para copiar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const resultText = validResults
       .map(result => `${result.hex} → ${result.decimal}`)
       .join('\n');
 
@@ -56,7 +109,7 @@ const BatchConverter = () => {
       await navigator.clipboard.writeText(resultText);
       toast({
         title: "Copiado!",
-        description: "Resultados copiados para a área de transferência.",
+        description: `${validResults.length} resultados válidos copiados.`,
       });
     } catch (err) {
       toast({
@@ -67,28 +120,75 @@ const BatchConverter = () => {
     }
   };
 
+  const handleCopyOnlyMZone = async () => {
+    const validResults = batchResults.filter(r => r.isValid);
+    
+    if (validResults.length === 0) {
+      toast({
+        title: "Atenção",
+        description: "Não há códigos MZone válidos para copiar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const mzoneOnly = validResults
+      .map(result => result.decimal)
+      .join('\n');
+
+    try {
+      await navigator.clipboard.writeText(mzoneOnly);
+      toast({
+        title: "Copiado!",
+        description: `${validResults.length} códigos MZone copiados.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Erro",
+        description: "Não foi possível copiar os códigos.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleDownload = () => {
     if (batchResults.length === 0) return;
 
     // Criar dados para o Excel
     const data = [
-      ['iButton', 'MZone'], // Cabeçalho
-      ...batchResults.map(result => [result.hex, result.decimal])
+      ['Original', 'iButton Limpo', 'MZone', 'Status', 'Erro'], // Cabeçalho
+      ...batchResults.map(result => [
+        result.original,
+        result.hex,
+        result.decimal,
+        result.isValid ? 'Válido' : 'Inválido',
+        result.error || ''
+      ])
     ];
 
     // Criar workbook e worksheet
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(data);
     
+    // Definir a largura das colunas
+    ws['!cols'] = [
+      { width: 20 }, // Original
+      { width: 20 }, // iButton Limpo
+      { width: 15 }, // MZone
+      { width: 10 }, // Status
+      { width: 30 }  // Erro
+    ];
+    
     // Adicionar a planilha ao workbook
     XLSX.utils.book_append_sheet(wb, ws, 'Conversao iButton');
     
     // Fazer download do arquivo
-    XLSX.writeFile(wb, 'conversao_ibutton.xlsx');
+    const fileName = `conversao_ibutton_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, fileName);
 
     toast({
       title: "Download iniciado",
-      description: "Arquivo Excel baixado com sucesso.",
+      description: `Arquivo ${fileName} baixado com sucesso.`,
     });
   };
 
@@ -96,6 +196,9 @@ const BatchConverter = () => {
     setBatchInput('');
     setBatchResults([]);
   };
+
+  const validCount = batchResults.filter(r => r.isValid).length;
+  const invalidCount = batchResults.length - validCount;
 
   return (
     <div className="space-y-6">
@@ -105,7 +208,7 @@ const BatchConverter = () => {
           <CardHeader className="bg-blue-50/50">
             <CardTitle className="text-blue-800 text-lg">Códigos em Lote</CardTitle>
             <CardDescription>
-              Digite um código iButton por linha
+              Digite um código iButton por linha (16 dígitos hexadecimais)
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-6">
@@ -116,13 +219,13 @@ const BatchConverter = () => {
                 </Label>
                 <Textarea
                   id="batch-input"
-                  placeholder={`3F000001156660301\n3F000001234ABCD01\n3F00000ABCDEF1234\n...`}
+                  placeholder={`0C000001A00BC401\n0C000001234ABC01\n0C00000ABCDEF401\n...`}
                   value={batchInput}
-                  onChange={(e) => setBatchInput(e.target.value.toUpperCase())}
+                  onChange={(e) => setBatchInput(e.target.value)}
                   className="mt-1 font-mono h-32 border-blue-300 focus:border-blue-500"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Linhas vazias serão ignoradas
+                  Linhas vazias e caracteres não-hexadecimais serão ignorados
                 </p>
               </div>
               
@@ -130,18 +233,25 @@ const BatchConverter = () => {
                 <Button 
                   onClick={processBatch}
                   className="flex-1 bg-blue-600 hover:bg-blue-700"
-                  disabled={!batchInput.trim()}
+                  disabled={!batchInput.trim() || isProcessing}
                 >
-                  Converter Lote
+                  {isProcessing ? 'Processando...' : 'Converter Lote'}
                 </Button>
                 <Button 
                   variant="outline" 
                   onClick={handleClear}
                   className="border-gray-300 hover:bg-gray-50"
+                  disabled={isProcessing}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
+
+              {batchInput && (
+                <div className="text-xs text-gray-600">
+                  <p>Linhas para processar: {batchInput.split('\n').filter(line => line.trim() !== '').length}</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -158,46 +268,79 @@ const BatchConverter = () => {
             <div className="space-y-4">
               {batchResults.length > 0 ? (
                 <>
-                  <div className="max-h-32 overflow-y-auto border border-green-300 rounded-md p-3 bg-gray-50">
+                  <div className="max-h-40 overflow-y-auto border border-green-300 rounded-md p-3 bg-gray-50">
                     <div className="space-y-1 font-mono text-sm">
                       {batchResults.map((result, index) => (
-                        <div key={index} className={`flex justify-between items-center p-1 rounded ${
-                          result.isValid ? 'text-green-700' : 'text-red-600 bg-red-50'
+                        <div key={index} className={`flex items-center justify-between p-2 rounded ${
+                          result.isValid ? 'text-green-700 bg-green-50' : 'text-red-600 bg-red-50'
                         }`}>
-                          <span>{result.hex}</span>
-                          <span>→</span>
-                          <span className="font-bold">{result.decimal}</span>
+                          <div className="flex items-center space-x-2 flex-1">
+                            {result.isValid ? (
+                              <CheckCircle className="h-4 w-4 text-green-600" />
+                            ) : (
+                              <AlertCircle className="h-4 w-4 text-red-600" />
+                            )}
+                            <span className="truncate">{result.hex}</span>
+                          </div>
+                          <span className="mx-2">→</span>
+                          <div className="text-right">
+                            <div className="font-bold">{result.decimal}</div>
+                            {result.error && (
+                              <div className="text-xs text-red-500">{result.error}</div>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
                   </div>
                   
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <Button 
                       variant="outline" 
                       onClick={handleCopyResults}
-                      className="flex-1 border-green-300 hover:bg-green-50"
+                      className="border-green-300 hover:bg-green-50"
+                      disabled={validCount === 0}
                     >
                       <Copy className="h-4 w-4 mr-2" />
-                      Copiar
+                      Copiar Pares
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={handleCopyOnlyMZone}
+                      className="border-green-300 hover:bg-green-50"
+                      disabled={validCount === 0}
+                    >
+                      <Copy className="h-4 w-4 mr-2" />
+                      Só MZone
                     </Button>
                     <Button 
                       variant="outline" 
                       onClick={handleDownload}
-                      className="flex-1 border-green-300 hover:bg-green-50"
+                      className="col-span-2 border-green-300 hover:bg-green-50"
                     >
                       <Download className="h-4 w-4 mr-2" />
-                      Exportar para Excel
+                      Exportar Excel
                     </Button>
                   </div>
 
-                  <div className="text-xs text-gray-600 text-center">
-                    {batchResults.filter(r => r.isValid).length} de {batchResults.length} conversões válidas
+                  {/* Estatísticas */}
+                  <div className="flex justify-center space-x-6 text-sm">
+                    <div className="flex items-center space-x-1 text-green-600">
+                      <CheckCircle className="h-4 w-4" />
+                      <span>{validCount} válidos</span>
+                    </div>
+                    <div className="flex items-center space-x-1 text-red-600">
+                      <AlertCircle className="h-4 w-4" />
+                      <span>{invalidCount} inválidos</span>
+                    </div>
                   </div>
                 </>
               ) : (
                 <div className="text-center py-8 text-gray-500">
+                  <p className="text-lg">📋</p>
                   <p>Os códigos MZone aparecerão aqui após a conversão</p>
+                  <p className="text-xs mt-2">Formato esperado: 16 dígitos hexadecimais</p>
+                  <p className="text-xs">Exemplo: 0C000001A00BC401</p>
                 </div>
               )}
             </div>

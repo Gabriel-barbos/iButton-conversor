@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -62,6 +61,15 @@ const SingleConverter = () => {
     setDecimalResult('');
   };
 
+  // Função para validar entrada hexadecimal
+  const handleHexInput = (value: string, maxLength: number) => {
+    const hexRegex = /^[0-9A-Fa-f]*$/;
+    if (hexRegex.test(value) && value.length <= maxLength) {
+      return value.toUpperCase();
+    }
+    return value.slice(0, -1); // Remove o último caractere se inválido
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid md:grid-cols-2 gap-6">
@@ -70,7 +78,7 @@ const SingleConverter = () => {
           <CardHeader className="bg-blue-50/50">
             <CardTitle className="text-blue-800 text-lg">Código do iButton</CardTitle>
             <CardDescription>
-              Digite o código completo do iButton em partes
+              Digite o código completo do iButton (16 dígitos hexadecimais)
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-6">
@@ -83,9 +91,9 @@ const SingleConverter = () => {
                   <Input
                     id="first-digits"
                     type="text"
-                    placeholder="Ex: 3F"
+                    placeholder="Ex: 0C"
                     value={firstDigits}
-                    onChange={(e) => setFirstDigits(e.target.value.toUpperCase())}
+                    onChange={(e) => setFirstDigits(handleHexInput(e.target.value, 2))}
                     className="mt-1 font-mono border-2 border-red-400 focus:border-red-600 focus:ring-red-600"
                     maxLength={2}
                   />
@@ -98,10 +106,11 @@ const SingleConverter = () => {
                   <Input
                     id="main-code"
                     type="text"
-                    placeholder="Ex: 000001156660"
+                    placeholder="Ex: 000001A00BC4"
                     value={mainCode}
-                    onChange={(e) => setMainCode(e.target.value.toUpperCase())}
+                    onChange={(e) => setMainCode(handleHexInput(e.target.value, 12))}
                     className={`mt-1 font-mono border-2 ${!isValid ? 'border-red-500 focus:border-red-500' : 'border-green-400 focus:border-green-600 focus:ring-green-600'}`}
+                    maxLength={12}
                   />
                 </div>
                 
@@ -114,18 +123,14 @@ const SingleConverter = () => {
                     type="text"
                     placeholder="Ex: 01"
                     value={lastDigits}
-                    onChange={(e) => setLastDigits(e.target.value.toUpperCase())}
+                    onChange={(e) => setLastDigits(handleHexInput(e.target.value, 2))}
                     className="mt-1 font-mono border-2 border-blue-400 focus:border-blue-600 focus:ring-blue-600"
                     maxLength={2}
                   />
                 </div>
               </div>
               
-              {!isValid && fullCode && (
-                <p className="text-red-500 text-xs mt-1">
-                  Por favor, digite um código iButton válido (mínimo 15 dígitos hexadecimais)
-                </p>
-              )}
+            
             </div>
           </CardContent>
         </Card>
@@ -135,7 +140,7 @@ const SingleConverter = () => {
           <CardHeader className="bg-green-50/50">
             <CardTitle className="text-green-800 text-lg">Código MZone</CardTitle>
             <CardDescription>
-              Código convertido para MZone
+              Código convertido para MZone (decimal)
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-6">
@@ -150,8 +155,8 @@ const SingleConverter = () => {
                     type="text"
                     value={decimalResult}
                     readOnly
-                    className="mt-1 font-mono bg-gray-50 border-green-300"
-                    placeholder="Código aparecerá aqui"
+                    className="mt-1 font-mono bg-gray-50 border-green-300 text-lg"
+                    placeholder="Código aparecerá aqui automaticamente"
                   />
                   {decimalResult && (
                     <Button
@@ -165,6 +170,8 @@ const SingleConverter = () => {
                   )}
                 </div>
               </div>
+
+      
             </div>
           </CardContent>
         </Card>
@@ -177,12 +184,12 @@ const SingleConverter = () => {
           onClick={handleClear}
           className="border-gray-300 hover:bg-gray-50"
         >
-          Limpar
+          Limpar Tudo
         </Button>
       </div>
 
       {/* Visual Flow Indicator */}
-      {fullCode && isValid && (
+      {fullCode && isValid && fullCode.length === 16 && (
         <div className="flex items-center justify-center space-x-4 p-4 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg border border-blue-200">
           <div className="text-center">
             <p className="text-xs text-gray-600 uppercase tracking-wide font-semibold">iButton</p>
